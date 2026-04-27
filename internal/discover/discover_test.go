@@ -4,208 +4,52 @@ import (
 	"bytes"
 	"io"
 	"os"
-	"path/filepath"
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/edouard-claude/snip/internal/harness"
 )
 
-func TestParseBashCommand(t *testing.T) {
-	cutoff := time.Date(2020, 1, 1, 0, 0, 0, 0, time.UTC)
-
-	tests := []struct {
-		name string
-		line string
-		want string
-	}{
-		{
-			name: "simple bash command",
-			line: `{"type":"assistant","message":{"role":"assistant","content":[{"type":"tool_use","name":"Bash","input":{"command":"go test ./..."}}]},"timestamp":"2026-02-19T07:42:14.131Z"}`,
-			want: "go",
-		},
-		{
-			name: "git status command",
-			line: `{"type":"assistant","message":{"role":"assistant","content":[{"type":"tool_use","name":"Bash","input":{"command":"git status"}}]},"timestamp":"2026-02-19T07:42:14.131Z"}`,
-			want: "git",
-		},
-		{
-			name: "command with env vars",
-			line: `{"type":"assistant","message":{"role":"assistant","content":[{"type":"tool_use","name":"Bash","input":{"command":"CGO_ENABLED=0 go build ./..."}}]},"timestamp":"2026-02-19T07:42:14.131Z"}`,
-			want: "go",
-		},
-		{
-			name: "command with pipe",
-			line: `{"type":"assistant","message":{"role":"assistant","content":[{"type":"tool_use","name":"Bash","input":{"command":"git log --oneline | head -5"}}]},"timestamp":"2026-02-19T07:42:14.131Z"}`,
-			want: "git",
-		},
-		{
-			name: "command with semicolons",
-			line: `{"type":"assistant","message":{"role":"assistant","content":[{"type":"tool_use","name":"Bash","input":{"command":"make build; make test"}}]},"timestamp":"2026-02-19T07:42:14.131Z"}`,
-			want: "make",
-		},
-		{
-			name: "non-bash tool use",
-			line: `{"type":"assistant","message":{"role":"assistant","content":[{"type":"tool_use","name":"Read","input":{"file_path":"/tmp/foo"}}]},"timestamp":"2026-02-19T07:42:14.131Z"}`,
-			want: "",
-		},
-		{
-			name: "user message ignored",
-			line: `{"type":"user","message":{"role":"user","content":"hello"},"timestamp":"2026-02-19T07:42:14.131Z"}`,
-			want: "",
-		},
-		{
-			name: "malformed json",
-			line: `{invalid json`,
-			want: "",
-		},
-		{
-			name: "empty command",
-			line: `{"type":"assistant","message":{"role":"assistant","content":[{"type":"tool_use","name":"Bash","input":{"command":""}}]},"timestamp":"2026-02-19T07:42:14.131Z"}`,
-			want: "",
-		},
-		{
-			name: "command with full path",
-			line: `{"type":"assistant","message":{"role":"assistant","content":[{"type":"tool_use","name":"Bash","input":{"command":"/usr/bin/git status"}}]},"timestamp":"2026-02-19T07:42:14.131Z"}`,
-			want: "git",
-		},
-		{
-			name: "command with newline",
-			line: `{"type":"assistant","message":{"role":"assistant","content":[{"type":"tool_use","name":"Bash","input":{"command":"git add . && git commit -m \"fix\"\ngit push"}}]},"timestamp":"2026-02-19T07:42:14.131Z"}`,
-			want: "git",
-		},
-		{
-			name: "system message ignored",
-			line: `{"type":"system","content":"some system message","timestamp":"2026-02-19T07:42:14.131Z"}`,
-			want: "",
-		},
-		{
-			name: "multiple content items picks bash",
-			line: `{"type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":"hello"},{"type":"tool_use","name":"Bash","input":{"command":"npm install"}}]},"timestamp":"2026-02-19T07:42:14.131Z"}`,
-			want: "npm",
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			got := parseBashCommand([]byte(tt.line), cutoff)
-			if got != tt.want {
-				t.Errorf("parseBashCommand() = %q, want %q", got, tt.want)
-			}
-		})
-	}
+type stubProvider struct {
+	id     string
+	events []harness.Event
+	err    error
 }
 
-func TestParseBashCommandTimestamp(t *testing.T) {
-	// Command before cutoff should be ignored
-	cutoff := time.Date(2026, 3, 1, 0, 0, 0, 0, time.UTC)
-	line := `{"type":"assistant","message":{"role":"assistant","content":[{"type":"tool_use","name":"Bash","input":{"command":"go test ./..."}}]},"timestamp":"2026-02-19T07:42:14.131Z"}`
-	got := parseBashCommand([]byte(line), cutoff)
-	if got != "" {
-		t.Errorf("expected empty for old command, got %q", got)
-	}
+func (p stubProvider) ID() string { return p.id }
 
-	// Command after cutoff should be included
-	line = `{"type":"assistant","message":{"role":"assistant","content":[{"type":"tool_use","name":"Bash","input":{"command":"go test ./..."}}]},"timestamp":"2026-04-01T07:42:14.131Z"}`
-	got = parseBashCommand([]byte(line), cutoff)
-	if got != "go" {
-		t.Errorf("expected %q for recent command, got %q", "go", got)
+func (p stubProvider) Stream(_ harness.Query, yield func(harness.Event) error) error {
+	if p.err != nil {
+		return p.err
 	}
-}
-
-func TestExtractBaseCommand(t *testing.T) {
-	tests := []struct {
-		input string
-		want  string
-	}{
-		{"go test ./...", "go"},
-		{"git status", "git"},
-		{"CGO_ENABLED=0 go build", "go"},
-		{"FOO=bar BAZ=1 make test", "make"},
-		{"make build; make test", "make"},
-		{"git log | head -5", "git"},
-		{"/usr/bin/git status", "git"},
-		{"npm install && npm test", "npm"},
-		{"echo hello", "echo"},
-		{"  ls -la", "ls"},
+	for _, event := range p.events {
+		if err := yield(event); err != nil {
+			return err
+		}
 	}
-
-	for _, tt := range tests {
-		t.Run(tt.input, func(t *testing.T) {
-			got := extractBaseCommand(tt.input)
-			if got != tt.want {
-				t.Errorf("extractBaseCommand(%q) = %q, want %q", tt.input, got, tt.want)
-			}
-		})
-	}
-}
-
-func TestExtractCommands(t *testing.T) {
-	// Create a temp JSONL file
-	dir := t.TempDir()
-	path := filepath.Join(dir, "session.jsonl")
-
-	lines := []string{
-		`{"type":"assistant","message":{"role":"assistant","content":[{"type":"tool_use","name":"Bash","input":{"command":"go test ./..."}}]},"timestamp":"2026-04-01T10:00:00.000Z"}`,
-		`{"type":"assistant","message":{"role":"assistant","content":[{"type":"tool_use","name":"Bash","input":{"command":"git status"}}]},"timestamp":"2026-04-01T10:01:00.000Z"}`,
-		`{"type":"user","message":{"role":"user","content":"check status"},"timestamp":"2026-04-01T10:02:00.000Z"}`,
-		`{"type":"assistant","message":{"role":"assistant","content":[{"type":"tool_use","name":"Bash","input":{"command":"make build"}}]},"timestamp":"2026-04-01T10:03:00.000Z"}`,
-		`{invalid json line}`,
-		`{"type":"assistant","message":{"role":"assistant","content":[{"type":"tool_use","name":"Read","input":{"file_path":"/tmp/x"}}]},"timestamp":"2026-04-01T10:04:00.000Z"}`,
-	}
-
-	data := ""
-	for _, l := range lines {
-		data += l + "\n"
-	}
-	if err := os.WriteFile(path, []byte(data), 0644); err != nil {
-		t.Fatal(err)
-	}
-
-	cutoff := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
-	commands := extractCommands(path, cutoff)
-
-	if len(commands) != 3 {
-		t.Fatalf("expected 3 commands, got %d: %v", len(commands), commands)
-	}
-	if commands[0] != "go" {
-		t.Errorf("commands[0] = %q, want %q", commands[0], "go")
-	}
-	if commands[1] != "git" {
-		t.Errorf("commands[1] = %q, want %q", commands[1], "git")
-	}
-	if commands[2] != "make" {
-		t.Errorf("commands[2] = %q, want %q", commands[2], "make")
-	}
+	return nil
 }
 
 func TestScan(t *testing.T) {
-	// Create temp project dir with session files
-	dir := t.TempDir()
-
-	// Session 1: two supported, one unsupported
-	session1 := filepath.Join(dir, "session1.jsonl")
-	writeLines(t, session1, []string{
-		`{"type":"assistant","message":{"role":"assistant","content":[{"type":"tool_use","name":"Bash","input":{"command":"git status"}}]},"timestamp":"2026-04-01T10:00:00.000Z"}`,
-		`{"type":"assistant","message":{"role":"assistant","content":[{"type":"tool_use","name":"Bash","input":{"command":"go test ./..."}}]},"timestamp":"2026-04-01T10:01:00.000Z"}`,
-		`{"type":"assistant","message":{"role":"assistant","content":[{"type":"tool_use","name":"Bash","input":{"command":"cat file.txt"}}]},"timestamp":"2026-04-01T10:02:00.000Z"}`,
-	})
-
-	// Session 2: one supported
-	session2 := filepath.Join(dir, "session2.jsonl")
-	writeLines(t, session2, []string{
-		`{"type":"assistant","message":{"role":"assistant","content":[{"type":"tool_use","name":"Bash","input":{"command":"git log --oneline"}}]},"timestamp":"2026-04-01T10:00:00.000Z"}`,
-	})
-
-	// Subagent session inside a session directory
-	sessionDir := filepath.Join(dir, "abc123")
-	subDir := filepath.Join(sessionDir, "subagents")
-	if err := os.MkdirAll(subDir, 0755); err != nil {
-		t.Fatal(err)
+	query := harness.Query{All: true}
+	providers := []harness.Provider{
+		stubProvider{
+			id: "claude",
+			events: []harness.Event{
+				{Provider: "claude", SessionID: "session-1", ToolCall: &harness.ToolCall{Command: "git status"}},
+				{Provider: "claude", SessionID: "session-1", ToolCall: &harness.ToolCall{Command: "go test ./..."}},
+				{Provider: "claude", SessionID: "session-1", ToolCall: &harness.ToolCall{Command: "cat file.txt"}},
+			},
+		},
+		stubProvider{
+			id: "opencode",
+			events: []harness.Event{
+				{Provider: "opencode", SessionID: "session-2", ToolCall: &harness.ToolCall{Command: "git log --oneline"}},
+				{Provider: "opencode", SessionID: "session-3", ToolCall: &harness.ToolCall{Command: "make build"}},
+			},
+		},
 	}
-	subSession := filepath.Join(subDir, "agent-xyz.jsonl")
-	writeLines(t, subSession, []string{
-		`{"type":"assistant","message":{"role":"assistant","content":[{"type":"tool_use","name":"Bash","input":{"command":"make build"}}]},"timestamp":"2026-04-01T10:00:00.000Z"}`,
-	})
 
 	supportedCmds := map[string]struct{}{
 		"git":  {},
@@ -213,8 +57,7 @@ func TestScan(t *testing.T) {
 		"make": {},
 	}
 
-	cutoff := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
-	result := scan([]string{dir}, supportedCmds, cutoff)
+	result := scan(providers, supportedCmds, query)
 
 	if result.SessionsScanned != 3 {
 		t.Errorf("sessions scanned = %d, want 3", result.SessionsScanned)
@@ -229,15 +72,27 @@ func TestScan(t *testing.T) {
 		t.Errorf("unsupported count = %d, want 1", result.UnsupportedCount)
 	}
 
-	// Check that unsupported contains "cat"
 	found := false
-	for _, s := range result.Unsupported {
-		if s.Name == "cat" && s.Count == 1 {
+	for _, stat := range result.Unsupported {
+		if stat.Name == "cat" && stat.Count == 1 {
 			found = true
 		}
 	}
 	if !found {
 		t.Error("expected 'cat' in unsupported stats")
+	}
+}
+
+func TestScanSkipsProviderErrors(t *testing.T) {
+	result := scan([]harness.Provider{
+		stubProvider{err: io.EOF},
+	}, map[string]struct{}{}, harness.Query{All: true})
+
+	if result.SessionsScanned != 0 {
+		t.Errorf("sessions scanned = %d, want 0", result.SessionsScanned)
+	}
+	if result.TotalCommands != 0 {
+		t.Errorf("total commands = %d, want 0", result.TotalCommands)
 	}
 }
 
@@ -252,24 +107,14 @@ func TestMapToStats(t *testing.T) {
 	if len(stats) != 3 {
 		t.Fatalf("expected 3 stats, got %d", len(stats))
 	}
-	// Same count sorted alphabetically: go before git
 	if stats[0].Name != "git" && stats[0].Name != "go" {
 		t.Errorf("first stat should be git or go, got %s", stats[0].Name)
 	}
 	if stats[0].Count != 10 {
 		t.Errorf("first stat count = %d, want 10", stats[0].Count)
 	}
-	// Last should be make with count 5
 	if stats[2].Name != "make" || stats[2].Count != 5 {
 		t.Errorf("last stat = %v, want {make 5}", stats[2])
-	}
-}
-
-func TestCwdToProjectName(t *testing.T) {
-	got := cwdToProjectName("/Users/edouard/Code/go/snip")
-	want := "-Users-edouard-Code-go-snip"
-	if got != want {
-		t.Errorf("cwdToProjectName() = %q, want %q", got, want)
 	}
 }
 
@@ -297,44 +142,6 @@ func TestParseArgs(t *testing.T) {
 				t.Errorf("Since = %d, want %d", opts.Since, tt.since)
 			}
 		})
-	}
-}
-
-func TestFindSessionFiles(t *testing.T) {
-	dir := t.TempDir()
-
-	// Create some session files
-	writeLines(t, filepath.Join(dir, "session1.jsonl"), []string{"{}"})
-	writeLines(t, filepath.Join(dir, "session2.jsonl"), []string{"{}"})
-
-	// Create a non-jsonl file (should be ignored)
-	writeLines(t, filepath.Join(dir, "notes.txt"), []string{"hello"})
-
-	// Create a subagent dir
-	sessionDir := filepath.Join(dir, "session-uuid")
-	subDir := filepath.Join(sessionDir, "subagents")
-	if err := os.MkdirAll(subDir, 0755); err != nil {
-		t.Fatal(err)
-	}
-	writeLines(t, filepath.Join(subDir, "agent-abc.jsonl"), []string{"{}"})
-
-	files := findSessionFiles([]string{dir})
-
-	if len(files) != 3 {
-		t.Errorf("expected 3 files, got %d: %v", len(files), files)
-	}
-}
-
-func TestEmptyScan(t *testing.T) {
-	dir := t.TempDir()
-	cutoff := time.Date(2020, 1, 1, 0, 0, 0, 0, time.UTC)
-	result := scan([]string{dir}, map[string]struct{}{}, cutoff)
-
-	if result.SessionsScanned != 0 {
-		t.Errorf("sessions scanned = %d, want 0", result.SessionsScanned)
-	}
-	if result.TotalCommands != 0 {
-		t.Errorf("total commands = %d, want 0", result.TotalCommands)
 	}
 }
 
@@ -409,13 +216,15 @@ func TestPrintResultTruncatesLongNames(t *testing.T) {
 	}
 }
 
-func writeLines(t *testing.T, path string, lines []string) {
-	t.Helper()
-	data := ""
-	for _, l := range lines {
-		data += l + "\n"
+func TestFirstNonEmpty(t *testing.T) {
+	if got := firstNonEmpty("", "two", "three"); got != "two" {
+		t.Fatalf("firstNonEmpty() = %q, want %q", got, "two")
 	}
-	if err := os.WriteFile(path, []byte(data), 0644); err != nil {
-		t.Fatal(err)
+}
+
+func TestQueryCutoffPlumbing(t *testing.T) {
+	query := harness.NewQuery(false, time.Date(2026, 4, 1, 0, 0, 0, 0, time.UTC))
+	if query.Since == 0 {
+		t.Fatal("expected query cutoff to be set")
 	}
 }

@@ -2,6 +2,40 @@ package harness
 
 import "testing"
 
+func TestExtractBaseCommandFast(t *testing.T) {
+	tests := []struct {
+		name   string
+		input  string
+		want   string
+		fastOK bool
+	}{
+		{name: "simple go test", input: "go test ./...", want: "go", fastOK: true},
+		{name: "path binary", input: "/usr/bin/git status", want: "git", fastOK: true},
+		{name: "env prefix", input: "CGO_ENABLED=0 go build", want: "go", fastOK: true},
+		{name: "quoted env prefix", input: "FOO='bar baz' go test ./...", want: "go", fastOK: true},
+		{name: "shell builtin still simple", input: "echo hello", want: "", fastOK: true},
+		{name: "control flow falls back", input: "if [ -f package.json ]; then node scripts/check.js; fi", fastOK: false},
+		{name: "pipeline falls back", input: "git log | head -5", fastOK: false},
+		{name: "assignment with substitution falls back", input: "tmpfile=$(mktemp) && rtk go test ./...", fastOK: false},
+		{name: "command wrapper falls back", input: "command log show --last 20m --style compact", fastOK: false},
+		{name: "bash c wrapper falls back", input: "bash -lc 'go test ./internal/harness/...'", fastOK: false},
+		{name: "pnpm exec wrapper falls back", input: "pnpm exec playwright test", fastOK: false},
+		{name: "mise wrapper falls back", input: "mise x -- bun test", fastOK: false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, ok := extractBaseCommandFast(tt.input)
+			if ok != tt.fastOK {
+				t.Fatalf("extractBaseCommandFast(%q) ok = %v, want %v", tt.input, ok, tt.fastOK)
+			}
+			if got != tt.want {
+				t.Fatalf("extractBaseCommandFast(%q) = %q, want %q", tt.input, got, tt.want)
+			}
+		})
+	}
+}
+
 func TestExtractBaseCommand(t *testing.T) {
 	tests := []struct {
 		name  string

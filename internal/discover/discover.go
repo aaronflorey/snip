@@ -5,6 +5,7 @@ import (
 	"os"
 	"sort"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/edouard-claude/snip/internal/config"
@@ -110,35 +111,85 @@ func scan(providers []harness.Provider, supportedCmds map[string]struct{}, query
 	supported := make(map[string]int)
 	unsupported := make(map[string]int)
 	sessions := make(map[string]struct{})
-	totalCmds := 0
 	debug := make([]harness.DebugRecord, 0)
-	query.Debug = chainDebug(query.Debug, func(record harness.DebugRecord) {
-		debug = append(debug, record)
-	})
 
-	for _, provider := range providers {
-		err := provider.Stream(query, func(event harness.Event) error {
-			if event.ToolCall == nil || event.ToolCall.Command == "" {
+	type providerResult struct {
+		supported   map[string]int
+		unsupported map[string]int
+		sessions    map[string]struct{}
+		totalCmds   int
+		debug       []harness.DebugRecord
+	}
+
+	results := make([]providerResult, len(providers))
+	var wg sync.WaitGroup
+	var debugMu sync.Mutex
+
+	for i, provider := range providers {
+		wg.Add(1)
+		go func(i int, provider harness.Provider) {
+			defer wg.Done()
+
+			result := providerResult{
+				supported:   make(map[string]int),
+				unsupported: make(map[string]int),
+				sessions:    make(map[string]struct{}),
+				debug:       make([]harness.DebugRecord, 0),
+			}
+
+			providerQuery := query
+			providerQuery.Debug = chainDebug(func(record harness.DebugRecord) {
+				debugMu.Lock()
+				defer debugMu.Unlock()
+				if query.Debug != nil {
+					query.Debug(record)
+				}
+			}, func(record harness.DebugRecord) {
+				result.debug = append(result.debug, record)
+			})
+
+			err := provider.Stream(providerQuery, func(event harness.Event) error {
+				if event.ToolCall == nil || event.ToolCall.Command == "" {
+					return nil
+				}
+
+				cmd := harness.ExtractBaseCommand(event.ToolCall.Command)
+				if cmd == "" {
+					return nil
+				}
+
+				result.totalCmds++
+				result.sessions[event.Provider+":"+firstNonEmpty(event.SessionID, event.Source)] = struct{}{}
+				if _, ok := supportedCmds[cmd]; ok {
+					result.supported[cmd]++
+				} else {
+					result.unsupported[cmd]++
+				}
 				return nil
+			})
+			if err != nil {
+				return
 			}
 
-			cmd := harness.ExtractBaseCommand(event.ToolCall.Command)
-			if cmd == "" {
-				return nil
-			}
+			results[i] = result
+		}(i, provider)
+	}
 
-			totalCmds++
-			sessions[event.Provider+":"+firstNonEmpty(event.SessionID, event.Source)] = struct{}{}
-			if _, ok := supportedCmds[cmd]; ok {
-				supported[cmd]++
-			} else {
-				unsupported[cmd]++
-			}
-			return nil
-		})
-		if err != nil {
-			continue
+	wg.Wait()
+
+	totalCmds := 0
+	for _, result := range results {
+		totalCmds += result.totalCmds
+		for session := range result.sessions {
+			sessions[session] = struct{}{}
 		}
+		for cmd, count := range result.supported {
+			supported[cmd] += count
+		}
+		for cmd, count := range result.unsupported {
+			unsupported[cmd] += count
+		}
+		debug = append(debug, result.debug...)
 	}
 
 	return Result{

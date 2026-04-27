@@ -1,6 +1,7 @@
 package harness
 
 import (
+	"database/sql"
 	"encoding/json"
 	"path/filepath"
 	"strings"
@@ -18,9 +19,16 @@ func (p CodexProvider) Stream(query Query, yield func(Event) error) error {
 		root = filepath.Join(homeDir(), ".codex", "sessions")
 	}
 
-	files, _ := filepath.Glob(filepath.Join(root, "*", "*", "*", "rollout-*.jsonl"))
+	files, ok := p.candidateFiles(root, query)
+	if !ok {
+		files, _ = filepath.Glob(filepath.Join(root, "*", "*", "*", "rollout-*.jsonl"))
+	}
 	if len(files) == 0 {
-		emitDebug(query, p.ID(), "unavailable", "no codex rollout jsonl files found under %s", root)
+		if ok {
+			emitDebug(query, p.ID(), "summary", "files=0 yielded=0 skipped_scope=0 skipped_cutoff=0 skipped_command=0")
+		} else {
+			emitDebug(query, p.ID(), "unavailable", "no codex rollout jsonl files found under %s", root)
+		}
 		return nil
 	}
 	stats := &providerDebugStats{}
@@ -33,6 +41,55 @@ func (p CodexProvider) Stream(query Query, yield func(Event) error) error {
 	}
 	emitDebug(query, p.ID(), "summary", "files=%d yielded=%d skipped_scope=%d skipped_cutoff=%d skipped_command=%d", stats.Files, stats.Yielded, stats.ScopeSkips, stats.CutoffSkips, stats.CommandSkips)
 	return nil
+}
+
+func (p CodexProvider) candidateFiles(root string, query Query) ([]string, bool) {
+	if query.All || !SQLiteAvailable {
+		return nil, false
+	}
+
+	stateDBs, _ := filepath.Glob(filepath.Join(filepath.Dir(root), "state_*.sqlite"))
+	if len(stateDBs) == 0 {
+		return nil, false
+	}
+
+	seen := make(map[string]struct{})
+	var files []string
+	usedMetadata := false
+	for _, dbPath := range stateDBs {
+		db, err := sql.Open("sqlite", dbPath)
+		if err != nil {
+			continue
+		}
+
+		rows, err := db.Query(`SELECT rollout_path, cwd FROM threads`)
+		if err != nil {
+			_ = db.Close()
+			continue
+		}
+		usedMetadata = true
+		for rows.Next() {
+			var rolloutPath, cwd string
+			if err := rows.Scan(&rolloutPath, &cwd); err != nil {
+				continue
+			}
+			if !matchesProject(query, cwd) {
+				continue
+			}
+			if !filepath.IsAbs(rolloutPath) {
+				rolloutPath = filepath.Join(root, rolloutPath)
+			}
+			if _, ok := seen[rolloutPath]; ok {
+				continue
+			}
+			seen[rolloutPath] = struct{}{}
+			files = append(files, rolloutPath)
+		}
+		_ = rows.Close()
+		_ = db.Close()
+	}
+
+	return files, usedMetadata
 }
 
 type codexLine struct {

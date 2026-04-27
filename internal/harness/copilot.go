@@ -1,6 +1,7 @@
 package harness
 
 import (
+	"database/sql"
 	"encoding/json"
 	"path/filepath"
 )
@@ -17,9 +18,16 @@ func (p CopilotProvider) Stream(query Query, yield func(Event) error) error {
 		root = filepath.Join(homeDir(), ".copilot", "session-state")
 	}
 
-	files, _ := filepath.Glob(filepath.Join(root, "*", "events.jsonl"))
+	files, ok := p.candidateFiles(root, query)
+	if !ok {
+		files, _ = filepath.Glob(filepath.Join(root, "*", "events.jsonl"))
+	}
 	if len(files) == 0 {
-		emitDebug(query, p.ID(), "unavailable", "no copilot session-state events.jsonl files found under %s", root)
+		if ok {
+			emitDebug(query, p.ID(), "summary", "files=0 yielded=0 skipped_scope=0 skipped_cutoff=0 skipped_command=0")
+		} else {
+			emitDebug(query, p.ID(), "unavailable", "no copilot session-state events.jsonl files found under %s", root)
+		}
 		return nil
 	}
 	stats := &providerDebugStats{}
@@ -32,6 +40,52 @@ func (p CopilotProvider) Stream(query Query, yield func(Event) error) error {
 	}
 	emitDebug(query, p.ID(), "summary", "files=%d yielded=%d skipped_scope=%d skipped_cutoff=%d skipped_command=%d", stats.Files, stats.Yielded, stats.ScopeSkips, stats.CutoffSkips, stats.CommandSkips)
 	return nil
+}
+
+func (p CopilotProvider) candidateFiles(root string, query Query) ([]string, bool) {
+	if query.All || !SQLiteAvailable {
+		return nil, false
+	}
+
+	dbPath := filepath.Join(filepath.Dir(root), "session-store.db")
+	if firstExistingPath(dbPath) == "" {
+		return nil, false
+	}
+
+	db, err := sql.Open("sqlite", dbPath)
+	if err != nil {
+		return nil, false
+	}
+	defer func() { _ = db.Close() }()
+
+	rows, err := db.Query(`SELECT id, cwd, repository FROM sessions`)
+	if err != nil {
+		return nil, false
+	}
+	defer func() { _ = rows.Close() }()
+
+	seen := make(map[string]struct{})
+	var files []string
+	for rows.Next() {
+		var sessionID, cwd, repository string
+		if err := rows.Scan(&sessionID, &cwd, &repository); err != nil {
+			continue
+		}
+		if sessionID == "" {
+			continue
+		}
+		if !matchesProject(query, cwd) && !matchesProject(query, repository) {
+			continue
+		}
+		path := filepath.Join(root, sessionID, "events.jsonl")
+		if _, ok := seen[path]; ok {
+			continue
+		}
+		seen[path] = struct{}{}
+		files = append(files, path)
+	}
+
+	return files, true
 }
 
 type copilotLine struct {

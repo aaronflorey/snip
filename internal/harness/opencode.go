@@ -4,6 +4,8 @@ import (
 	"database/sql"
 	"os"
 	"path/filepath"
+	"strings"
+	"time"
 )
 
 type OpenCodeProvider struct {
@@ -37,16 +39,8 @@ func (p OpenCodeProvider) Stream(query Query, yield func(Event) error) error {
 	}
 	defer func() { _ = db.Close() }()
 
-	rows, err := db.Query(`
-		SELECT part.session_id, session.directory, part.time_created,
-		       json_extract(part.data, '$.tool'),
-		       json_extract(part.data, '$.state.input.command'),
-		       part.data
-		FROM part
-		JOIN session ON session.id = part.session_id
-		WHERE json_extract(part.data, '$.type') = 'tool'
-		  AND json_extract(part.data, '$.tool') = 'bash'
-		ORDER BY part.time_created ASC`)
+	statement, args := buildOpenCodeQuery(query)
+	rows, err := db.Query(statement, args...)
 	if err != nil {
 		emitDebug(query, p.ID(), "error", "query %s: %v", dbPath, err)
 		return nil
@@ -118,4 +112,100 @@ func firstExistingPath(paths ...string) string {
 		}
 	}
 	return ""
+}
+
+func buildOpenCodeQuery(query Query) (string, []any) {
+	var statement strings.Builder
+	args := make([]any, 0, 16)
+
+	statement.WriteString(`
+		SELECT part.session_id, session.directory, part.time_created,
+		       json_extract(part.data, '$.tool'),
+		       json_extract(part.data, '$.state.input.command'),
+		       part.data
+		FROM part
+		JOIN session ON session.id = part.session_id
+		WHERE json_extract(part.data, '$.type') = 'tool'
+		  AND json_extract(part.data, '$.tool') = 'bash'`)
+
+	if !query.All {
+		target := openCodeQueryTarget(query)
+		if target != "" {
+			statement.WriteString(`
+		  AND (`)
+
+			scopeClauses := make([]string, 0, len(openCodeScopeParents(target))+2)
+			scopeClauses = append(scopeClauses, "session.directory = ?", "session.directory LIKE ?")
+			args = append(args, target, target+string(os.PathSeparator)+"%")
+
+			for _, parent := range openCodeScopeParents(target) {
+				scopeClauses = append(scopeClauses, "session.directory = ?")
+				args = append(args, parent)
+			}
+
+			statement.WriteString(strings.Join(scopeClauses, " OR "))
+			statement.WriteString(`)`)
+		}
+	}
+
+	if cutoffClauses, cutoffArgs := openCodeCutoffSQL(query.Since); len(cutoffClauses) > 0 {
+		statement.WriteString(`
+		  AND (`)
+		statement.WriteString(strings.Join(cutoffClauses, " OR "))
+		statement.WriteString(`)`)
+		args = append(args, cutoffArgs...)
+	}
+
+	statement.WriteString(`
+		ORDER BY part.time_created ASC`)
+
+	return statement.String(), args
+}
+
+func openCodeQueryTarget(query Query) string {
+	target := query.ProjectRoot
+	if target == "" {
+		target = query.CWD
+	}
+	if target == "" {
+		return ""
+	}
+	return filepath.Clean(target)
+}
+
+func openCodeScopeParents(target string) []string {
+	parents := make([]string, 0, 8)
+	for path := filepath.Dir(target); path != target; path = filepath.Dir(path) {
+		parents = append(parents, path)
+		next := filepath.Dir(path)
+		if next == path {
+			break
+		}
+	}
+	return parents
+}
+
+func openCodeCutoffSQL(cutoff int64) ([]string, []any) {
+	if cutoff == 0 {
+		return nil, nil
+	}
+
+	clauses := []string{
+		"(part.time_created < 1000000000000 AND part.time_created >= ?)",
+		"(part.time_created >= 1000000000000 AND part.time_created < 1000000000000000 AND part.time_created >= ?)",
+		"(part.time_created >= 1000000000000000 AND part.time_created < 1000000000000000000 AND part.time_created >= ?)",
+		"(part.time_created >= 1000000000000000000 AND part.time_created >= ?)",
+	}
+	args := []any{
+		openCodeCutoffUnit(cutoff, time.Second),
+		openCodeCutoffUnit(cutoff, time.Millisecond),
+		openCodeCutoffUnit(cutoff, time.Microsecond),
+		cutoff,
+	}
+	return clauses, args
+}
+
+func openCodeCutoffUnit(cutoff int64, unit time.Duration) int64 {
+	step := int64(unit)
+	return (cutoff + step - 1) / step
 }

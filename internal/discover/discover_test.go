@@ -16,11 +16,15 @@ type stubProvider struct {
 	events []harness.Event
 	debug  []harness.DebugRecord
 	err    error
+	stream func(harness.Query, func(harness.Event) error) error
 }
 
 func (p stubProvider) ID() string { return p.id }
 
 func (p stubProvider) Stream(query harness.Query, yield func(harness.Event) error) error {
+	if p.stream != nil {
+		return p.stream(query, yield)
+	}
 	if p.err != nil {
 		return p.err
 	}
@@ -115,6 +119,58 @@ func TestScanSkipsProviderErrors(t *testing.T) {
 	}
 	if result.TotalCommands != 0 {
 		t.Errorf("total commands = %d, want 0", result.TotalCommands)
+	}
+}
+
+func TestScanRunsProvidersConcurrently(t *testing.T) {
+	firstStarted := make(chan struct{}, 1)
+	secondStarted := make(chan struct{}, 1)
+	releaseFirst := make(chan struct{})
+	done := make(chan Result, 1)
+
+	providers := []harness.Provider{
+		stubProvider{stream: func(query harness.Query, yield func(harness.Event) error) error {
+			firstStarted <- struct{}{}
+			<-releaseFirst
+			return yield(harness.Event{Provider: "claude", SessionID: "session-1", ToolCall: &harness.ToolCall{Command: "git status"}})
+		}},
+		stubProvider{stream: func(query harness.Query, yield func(harness.Event) error) error {
+			secondStarted <- struct{}{}
+			return yield(harness.Event{Provider: "opencode", SessionID: "session-2", ToolCall: &harness.ToolCall{Command: "cat file.txt"}})
+		}},
+	}
+
+	go func() {
+		done <- scan(providers, map[string]struct{}{"git": {}}, harness.Query{All: true})
+	}()
+
+	select {
+	case <-firstStarted:
+	case <-time.After(time.Second):
+		t.Fatal("first provider did not start")
+	}
+
+	select {
+	case <-secondStarted:
+	case <-time.After(time.Second):
+		t.Fatal("second provider did not start before first provider finished")
+	}
+
+	close(releaseFirst)
+
+	select {
+	case result := <-done:
+		if result.TotalCommands != 2 {
+			t.Fatalf("total commands = %d, want 2", result.TotalCommands)
+		}
+		if result.SupportedCount != 1 {
+			t.Fatalf("supported count = %d, want 1", result.SupportedCount)
+		}
+		if result.UnsupportedCount != 1 {
+			t.Fatalf("unsupported count = %d, want 1", result.UnsupportedCount)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("scan did not finish")
 	}
 }
 

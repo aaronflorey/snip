@@ -151,6 +151,10 @@ func ExtractBaseCommand(cmd string) string {
 		return ""
 	}
 
+	if base, ok := extractBaseCommandFast(trimmed); ok {
+		return base
+	}
+
 	parser := syntax.NewParser(syntax.Variant(syntax.LangBash))
 	file, err := parser.Parse(strings.NewReader(trimmed), "discover")
 	if err != nil || file == nil {
@@ -158,6 +162,106 @@ func ExtractBaseCommand(cmd string) string {
 	}
 
 	return extractCommandFromStmts(file.Stmts)
+}
+
+func extractBaseCommandFast(cmd string) (string, bool) {
+	if !isSimpleCommandFastPath(cmd) {
+		return "", false
+	}
+
+	_, _, bareCmd := hook.ParseSegment(cmd)
+	args, ok := splitSimpleCommandArgs(bareCmd)
+	if !ok || len(args) == 0 {
+		return "", false
+	}
+
+	if requiresASTCommandParse(args[0]) {
+		return "", false
+	}
+
+	return resolveCommandArgs(args), true
+}
+
+func isSimpleCommandFastPath(cmd string) bool {
+	if strings.TrimSpace(cmd) == "" {
+		return false
+	}
+	if segment := strings.TrimSpace(hook.ExtractFirstSegment(cmd)); segment != cmd {
+		return false
+	}
+
+	var quote byte
+	for i := 0; i < len(cmd); i++ {
+		ch := cmd[i]
+
+		if quote != 0 {
+			if ch == quote {
+				quote = 0
+			}
+			continue
+		}
+
+		switch ch {
+		case '\'', '"':
+			quote = ch
+		case '$', '`', '\\', '(', ')', '{', '}', '<', '>', '!', '#', '\n', '\r':
+			return false
+		}
+	}
+
+	return quote == 0
+}
+
+func splitSimpleCommandArgs(cmd string) ([]string, bool) {
+	var args []string
+	var builder strings.Builder
+	var quote byte
+
+	flush := func() {
+		if builder.Len() == 0 {
+			return
+		}
+		args = append(args, builder.String())
+		builder.Reset()
+	}
+
+	for i := 0; i < len(cmd); i++ {
+		ch := cmd[i]
+
+		if quote != 0 {
+			if ch == quote {
+				quote = 0
+				continue
+			}
+			builder.WriteByte(ch)
+			continue
+		}
+
+		switch ch {
+		case '\'', '"':
+			quote = ch
+		case ' ', '\t':
+			flush()
+		default:
+			builder.WriteByte(ch)
+		}
+	}
+
+	if quote != 0 {
+		return nil, false
+	}
+
+	flush()
+	return args, len(args) > 0
+}
+
+func requiresASTCommandParse(name string) bool {
+	switch normalizeCommandName(name) {
+	case "", "bash", "builtin", "bunx", "command", "dash", "env", "for", "if", "mise", "npx", "pnpm", "rtk", "sh", "snip", "sudo", "time", "while", "yarn", "zsh":
+		return true
+	default:
+		return false
+	}
 }
 
 func extractCommandFromStmts(stmts []*syntax.Stmt) string {

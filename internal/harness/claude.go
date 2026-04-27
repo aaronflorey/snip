@@ -18,28 +18,59 @@ func (p ClaudeProvider) Stream(query Query, yield func(Event) error) error {
 	if base == "" {
 		base = filepath.Join(homeDir(), ".claude", "projects")
 	}
-
-	projectDirs, err := p.projectDirs(base, query)
-	if err != nil || len(projectDirs) == 0 {
+	if _, err := os.Stat(base); err != nil {
+		if os.IsNotExist(err) {
+			emitDebug(query, p.ID(), "unavailable", "base dir not found: %s", base)
+			return nil
+		}
+		emitDebug(query, p.ID(), "error", "stat %s: %v", base, err)
 		return err
 	}
 
+	projectDirs, err := p.projectDirs(base, query)
+	if err != nil {
+		emitDebug(query, p.ID(), "error", "resolve project dirs: %v", err)
+		return err
+	}
+	if len(projectDirs) == 0 {
+		emitDebug(query, p.ID(), "scope_miss", "no project directories matched %q", defaultString(query.ProjectRoot, query.CWD))
+		return nil
+	}
+
+	filesSeen := 0
+	parseSkips := 0
+	cutoffSkips := 0
+	yielded := 0
+
 	for _, dir := range projectDirs {
-		for _, path := range claudeSessionFiles(dir) {
+		files := claudeSessionFiles(dir)
+		filesSeen += len(files)
+		for _, path := range files {
 			if err := scanJSONL(path, func(line []byte) error {
 				event, ok := parseClaudeLine(line, path, dir)
-				if !ok || !afterCutoff(event.Timestamp, query.Since) {
+				if !ok {
+					parseSkips++
 					return nil
 				}
+				if !afterCutoff(event.Timestamp, query.Since) {
+					cutoffSkips++
+					return nil
+				}
+				yielded++
 				return yield(event)
 			}); err != nil {
+				emitDebug(query, p.ID(), "scan_error", "scan %s: %v", path, err)
 				continue
 			}
 		}
 	}
+	if filesSeen == 0 {
+		emitDebug(query, p.ID(), "no_files", "project dirs matched but no session jsonl files were found")
+		return nil
+	}
+	emitDebug(query, p.ID(), "summary", "projects=%d files=%d yielded=%d skipped_cutoff=%d skipped_parse=%d", len(projectDirs), filesSeen, yielded, cutoffSkips, parseSkips)
 
 	return nil
-
 }
 
 func (p ClaudeProvider) projectDirs(base string, query Query) ([]string, error) {
@@ -60,6 +91,9 @@ func (p ClaudeProvider) projectDirs(base string, query Query) ([]string, error) 
 			if entry.IsDir() {
 				dirs = append(dirs, filepath.Join(base, entry.Name()))
 			}
+		}
+		if len(dirs) == 0 {
+			return nil, nil
 		}
 		return dirs, nil
 	}

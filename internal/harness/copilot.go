@@ -18,11 +18,19 @@ func (p CopilotProvider) Stream(query Query, yield func(Event) error) error {
 	}
 
 	files, _ := filepath.Glob(filepath.Join(root, "*", "events.jsonl"))
+	if len(files) == 0 {
+		emitDebug(query, p.ID(), "unavailable", "no copilot session-state events.jsonl files found under %s", root)
+		return nil
+	}
+	stats := &providerDebugStats{}
 	for _, path := range files {
-		if err := streamCopilotFile(path, query, yield); err != nil {
+		stats.Files++
+		if err := streamCopilotFile(path, query, stats, yield); err != nil {
+			emitDebug(query, p.ID(), "scan_error", "scan %s: %v", path, err)
 			continue
 		}
 	}
+	emitDebug(query, p.ID(), "summary", "files=%d yielded=%d skipped_scope=%d skipped_cutoff=%d skipped_command=%d", stats.Files, stats.Yielded, stats.ScopeSkips, stats.CutoffSkips, stats.CommandSkips)
 	return nil
 }
 
@@ -52,7 +60,7 @@ type copilotHookStart struct {
 	} `json:"input"`
 }
 
-func streamCopilotFile(path string, query Query, yield func(Event) error) error {
+func streamCopilotFile(path string, query Query, stats *providerDebugStats, yield func(Event) error) error {
 	var sessionID string
 	var projectRoot string
 
@@ -75,31 +83,35 @@ func streamCopilotFile(path string, query Query, yield func(Event) error) error 
 			if err := json.Unmarshal(entry.Data, &exec); err != nil {
 				return nil
 			}
-			return yieldCopilotEvent(path, query, sessionID, projectRoot, entry.Timestamp, exec.ToolName, exec.Arguments, entry.Data, yield)
+			return yieldCopilotEvent(path, query, stats, sessionID, projectRoot, entry.Timestamp, exec.ToolName, exec.Arguments, entry.Data, yield)
 		case "hook.start":
 			var hookStart copilotHookStart
 			if err := json.Unmarshal(entry.Data, &hookStart); err != nil {
 				return nil
 			}
-			return yieldCopilotEvent(path, query, sessionID, projectRoot, entry.Timestamp, hookStart.Input.ToolName, hookStart.Input.ToolArgs, entry.Data, yield)
+			return yieldCopilotEvent(path, query, stats, sessionID, projectRoot, entry.Timestamp, hookStart.Input.ToolName, hookStart.Input.ToolArgs, entry.Data, yield)
 		}
 
 		return nil
 	})
 }
 
-func yieldCopilotEvent(path string, query Query, sessionID, projectRoot, timestamp, toolName string, args json.RawMessage, metadata json.RawMessage, yield func(Event) error) error {
+func yieldCopilotEvent(path string, query Query, stats *providerDebugStats, sessionID, projectRoot, timestamp, toolName string, args json.RawMessage, metadata json.RawMessage, yield func(Event) error) error {
 	if !matchesProject(query, projectRoot) {
+		stats.ScopeSkips++
 		return nil
 	}
 	command := commandFromJSON(args)
 	if command == "" {
+		stats.CommandSkips++
 		return nil
 	}
 	ts := parseTimestamp(timestamp)
 	if !afterCutoff(ts, query.Since) {
+		stats.CutoffSkips++
 		return nil
 	}
+	stats.Yielded++
 
 	return yield(Event{
 		Provider:    "copilot",

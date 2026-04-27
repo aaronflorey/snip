@@ -14,14 +14,20 @@ import (
 type stubProvider struct {
 	id     string
 	events []harness.Event
+	debug  []harness.DebugRecord
 	err    error
 }
 
 func (p stubProvider) ID() string { return p.id }
 
-func (p stubProvider) Stream(_ harness.Query, yield func(harness.Event) error) error {
+func (p stubProvider) Stream(query harness.Query, yield func(harness.Event) error) error {
 	if p.err != nil {
 		return p.err
+	}
+	for _, record := range p.debug {
+		if query.Debug != nil {
+			query.Debug(record)
+		}
 	}
 	for _, event := range p.events {
 		if err := yield(event); err != nil {
@@ -29,6 +35,22 @@ func (p stubProvider) Stream(_ harness.Query, yield func(harness.Event) error) e
 		}
 	}
 	return nil
+}
+
+func TestScanCollectsDebugRecords(t *testing.T) {
+	result := scan([]harness.Provider{
+		stubProvider{
+			id:    "opencode",
+			debug: []harness.DebugRecord{{Provider: "opencode", Code: "summary", Message: "rows=3 yielded=1"}},
+		},
+	}, map[string]struct{}{}, harness.Query{All: true, Debug: func(harness.DebugRecord) {}})
+
+	if len(result.Debug) != 1 {
+		t.Fatalf("expected 1 debug record, got %d", len(result.Debug))
+	}
+	if result.Debug[0].Provider != "opencode" {
+		t.Fatalf("unexpected debug provider: %+v", result.Debug[0])
+	}
 }
 
 func TestScan(t *testing.T) {
@@ -123,13 +145,15 @@ func TestParseArgs(t *testing.T) {
 		name  string
 		args  []string
 		all   bool
+		debug bool
 		since int
 	}{
-		{"defaults", nil, false, 7},
-		{"all flag", []string{"--all"}, true, 7},
-		{"since flag", []string{"--since", "14"}, false, 14},
-		{"both flags", []string{"--all", "--since", "30"}, true, 30},
-		{"since without value", []string{"--since"}, false, 7},
+		{"defaults", nil, false, false, 7},
+		{"all flag", []string{"--all"}, true, false, 7},
+		{"debug flag", []string{"--debug"}, false, true, 7},
+		{"since flag", []string{"--since", "14"}, false, false, 14},
+		{"both flags", []string{"--all", "--debug", "--since", "30"}, true, true, 30},
+		{"since without value", []string{"--since"}, false, false, 7},
 	}
 
 	for _, tt := range tests {
@@ -137,6 +161,9 @@ func TestParseArgs(t *testing.T) {
 			opts := parseArgs(tt.args)
 			if opts.All != tt.all {
 				t.Errorf("All = %v, want %v", opts.All, tt.all)
+			}
+			if opts.Debug != tt.debug {
+				t.Errorf("Debug = %v, want %v", opts.Debug, tt.debug)
 			}
 			if opts.Since != tt.since {
 				t.Errorf("Since = %d, want %d", opts.Since, tt.since)
@@ -226,5 +253,18 @@ func TestQueryCutoffPlumbing(t *testing.T) {
 	query := harness.NewQuery(false, time.Date(2026, 4, 1, 0, 0, 0, 0, time.UTC))
 	if query.Since == 0 {
 		t.Fatal("expected query cutoff to be set")
+	}
+}
+
+func TestPrintDebug(t *testing.T) {
+	query := harness.Query{CWD: "/work/repo", ProjectRoot: "/work/repo"}
+	result := Result{Debug: []harness.DebugRecord{{Provider: "opencode", Code: "summary", Message: "rows=3 yielded=1"}}}
+	output := captureStdout(t, func() {
+		printDebug(Options{Debug: true, Since: 7}, query, result)
+	})
+	for _, want := range []string{"Discover Debug", "[opencode] summary: rows=3 yielded=1", "/work/repo"} {
+		if !strings.Contains(output, want) {
+			t.Fatalf("expected %q in output, got %q", want, output)
+		}
 	}
 }

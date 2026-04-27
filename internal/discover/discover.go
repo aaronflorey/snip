@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"sort"
+	"strings"
 	"time"
 
 	"github.com/edouard-claude/snip/internal/config"
@@ -27,11 +28,13 @@ type Result struct {
 	Unsupported      []CommandStat
 	SupportedCount   int
 	UnsupportedCount int
+	Debug            []harness.DebugRecord
 }
 
 // Options configures the discover scan.
 type Options struct {
 	All   bool
+	Debug bool
 	Since int // days
 }
 
@@ -57,7 +60,13 @@ func Run(args []string) error {
 	}
 
 	query := harness.NewQuery(opts.All, time.Now().AddDate(0, 0, -opts.Since))
+	if !opts.Debug {
+		query.Debug = nil
+	}
 	result := scan(harness.DefaultProviders(), cmdSet, query)
+	if opts.Debug {
+		printDebug(opts, query, result)
+	}
 	if result.SessionsScanned == 0 {
 		fmt.Fprintln(os.Stderr, "snip discover: no harness session data matched this repository; try --all to scan every project")
 		return nil
@@ -74,6 +83,8 @@ func parseArgs(args []string) Options {
 		switch args[i] {
 		case "--all":
 			opts.All = true
+		case "--debug":
+			opts.Debug = true
 		case "--since":
 			if i+1 < len(args) {
 				n := 0
@@ -100,6 +111,10 @@ func scan(providers []harness.Provider, supportedCmds map[string]struct{}, query
 	unsupported := make(map[string]int)
 	sessions := make(map[string]struct{})
 	totalCmds := 0
+	debug := make([]harness.DebugRecord, 0)
+	query.Debug = chainDebug(query.Debug, func(record harness.DebugRecord) {
+		debug = append(debug, record)
+	})
 
 	for _, provider := range providers {
 		err := provider.Stream(query, func(event harness.Event) error {
@@ -133,6 +148,24 @@ func scan(providers []harness.Provider, supportedCmds map[string]struct{}, query
 		Unsupported:      mapToStats(unsupported),
 		SupportedCount:   sumMap(supported),
 		UnsupportedCount: sumMap(unsupported),
+		Debug:            debug,
+	}
+}
+
+func chainDebug(fns ...func(harness.DebugRecord)) func(harness.DebugRecord) {
+	callbacks := make([]func(harness.DebugRecord), 0, len(fns))
+	for _, fn := range fns {
+		if fn != nil {
+			callbacks = append(callbacks, fn)
+		}
+	}
+	if len(callbacks) == 0 {
+		return nil
+	}
+	return func(record harness.DebugRecord) {
+		for _, fn := range callbacks {
+			fn(record)
+		}
 	}
 }
 
@@ -166,6 +199,38 @@ func sumMap(m map[string]int) int {
 		total += v
 	}
 	return total
+}
+
+func printDebug(opts Options, query harness.Query, result Result) {
+	fmt.Println()
+	fmt.Println("  snip — Discover Debug")
+	fmt.Println("  " + display.FormatSeparator(30))
+	fmt.Println()
+
+	scope := defaultScope(opts, query)
+	fmt.Printf("  Scope                 %s\n", scope)
+	fmt.Printf("  Since                 %d days\n", opts.Since)
+	fmt.Printf("  Working directory     %s\n", firstNonEmpty(query.CWD, "(unknown)"))
+	fmt.Printf("  Project root          %s\n", firstNonEmpty(query.ProjectRoot, "(unknown)"))
+	fmt.Println()
+
+	if len(result.Debug) == 0 {
+		fmt.Println("  No provider diagnostics were emitted.")
+		fmt.Println()
+		return
+	}
+
+	for _, record := range result.Debug {
+		fmt.Printf("  [%s] %s: %s\n", record.Provider, strings.ReplaceAll(record.Code, "_", " "), record.Message)
+	}
+	fmt.Println()
+}
+
+func defaultScope(opts Options, query harness.Query) string {
+	if opts.All {
+		return "all projects"
+	}
+	return firstNonEmpty(query.ProjectRoot, query.CWD, "(unknown)")
 }
 
 // printResult outputs the discover report to stdout.

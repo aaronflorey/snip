@@ -1,5 +1,13 @@
 package harness
 
+type providerDebugStats struct {
+	Files        int
+	Yielded      int
+	ScopeSkips   int
+	CutoffSkips  int
+	CommandSkips int
+}
+
 func defaultString(values ...string) string {
 	for _, value := range values {
 		if value != "" {

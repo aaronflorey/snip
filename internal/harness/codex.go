@@ -19,11 +19,19 @@ func (p CodexProvider) Stream(query Query, yield func(Event) error) error {
 	}
 
 	files, _ := filepath.Glob(filepath.Join(root, "*", "*", "*", "rollout-*.jsonl"))
+	if len(files) == 0 {
+		emitDebug(query, p.ID(), "unavailable", "no codex rollout jsonl files found under %s", root)
+		return nil
+	}
+	stats := &providerDebugStats{}
 	for _, path := range files {
-		if err := streamCodexFile(path, query, yield); err != nil {
+		stats.Files++
+		if err := streamCodexFile(path, query, stats, yield); err != nil {
+			emitDebug(query, p.ID(), "scan_error", "scan %s: %v", path, err)
 			continue
 		}
 	}
+	emitDebug(query, p.ID(), "summary", "files=%d yielded=%d skipped_scope=%d skipped_cutoff=%d skipped_command=%d", stats.Files, stats.Yielded, stats.ScopeSkips, stats.CutoffSkips, stats.CommandSkips)
 	return nil
 }
 
@@ -46,7 +54,7 @@ type codexResponseItem struct {
 	CallID    string `json:"call_id"`
 }
 
-func streamCodexFile(path string, query Query, yield func(Event) error) error {
+func streamCodexFile(path string, query Query, stats *providerDebugStats, yield func(Event) error) error {
 	var sessionID string
 	var projectRoot string
 
@@ -74,16 +82,20 @@ func streamCodexFile(path string, query Query, yield func(Event) error) error {
 				return nil
 			}
 			if !matchesProject(query, projectRoot) {
+				stats.ScopeSkips++
 				return nil
 			}
 			command := commandFromJSONString(item.Arguments)
 			if command == "" {
+				stats.CommandSkips++
 				return nil
 			}
 			ts := parseTimestamp(entry.Timestamp)
 			if !afterCutoff(ts, query.Since) {
+				stats.CutoffSkips++
 				return nil
 			}
+			stats.Yielded++
 
 			toolName := item.Name
 			if item.Namespace != "" {

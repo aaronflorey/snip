@@ -14,6 +14,14 @@ type Query struct {
 	Since       int64
 	CWD         string
 	ProjectRoot string
+	Debug       func(DebugRecord)
+}
+
+// DebugRecord captures provider-level scan diagnostics.
+type DebugRecord struct {
+	Provider string
+	Code     string
+	Message  string
 }
 
 // Event is the strict normalized session record shared across harnesses.

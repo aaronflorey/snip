@@ -2,6 +2,7 @@ package discover
 
 import (
 	"bytes"
+	"encoding/json"
 	"io"
 	"os"
 	"strings"
@@ -54,6 +55,42 @@ func TestScanCollectsDebugRecords(t *testing.T) {
 	}
 	if result.Debug[0].Provider != "opencode" {
 		t.Fatalf("unexpected debug provider: %+v", result.Debug[0])
+	}
+}
+
+func TestApplyMinCount(t *testing.T) {
+	result := applyMinCount(Result{
+		SessionsScanned: 3,
+		Supported: []CommandStat{
+			{Name: "git", Count: 6},
+			{Name: "go", Count: 4},
+		},
+		Unsupported: []CommandStat{
+			{Name: "cat", Count: 5},
+			{Name: "sed", Count: 2},
+		},
+		SupportedCount:   10,
+		UnsupportedCount: 7,
+		TotalCommands:    17,
+	}, 5)
+
+	if result.MinCount != 5 {
+		t.Fatalf("MinCount = %d, want 5", result.MinCount)
+	}
+	if result.TotalCommands != 11 {
+		t.Fatalf("TotalCommands = %d, want 11", result.TotalCommands)
+	}
+	if result.SupportedCount != 6 {
+		t.Fatalf("SupportedCount = %d, want 6", result.SupportedCount)
+	}
+	if result.UnsupportedCount != 5 {
+		t.Fatalf("UnsupportedCount = %d, want 5", result.UnsupportedCount)
+	}
+	if len(result.Supported) != 1 || result.Supported[0].Name != "git" {
+		t.Fatalf("unexpected supported stats: %+v", result.Supported)
+	}
+	if len(result.Unsupported) != 1 || result.Unsupported[0].Name != "cat" {
+		t.Fatalf("unexpected unsupported stats: %+v", result.Unsupported)
 	}
 }
 
@@ -198,18 +235,21 @@ func TestMapToStats(t *testing.T) {
 
 func TestParseArgs(t *testing.T) {
 	tests := []struct {
-		name  string
-		args  []string
-		all   bool
-		debug bool
-		since int
+		name     string
+		args     []string
+		all      bool
+		debug    bool
+		json     bool
+		minCount int
+		since    int
 	}{
-		{"defaults", nil, false, false, 7},
-		{"all flag", []string{"--all"}, true, false, 7},
-		{"debug flag", []string{"--debug"}, false, true, 7},
-		{"since flag", []string{"--since", "14"}, false, false, 14},
-		{"both flags", []string{"--all", "--debug", "--since", "30"}, true, true, 30},
-		{"since without value", []string{"--since"}, false, false, 7},
+		{"defaults", nil, false, false, false, 5, 7},
+		{"all flag", []string{"--all"}, true, false, false, 5, 7},
+		{"debug flag", []string{"--debug"}, false, true, false, 5, 7},
+		{"json flag", []string{"--json"}, false, false, true, 5, 7},
+		{"since flag", []string{"--since", "14"}, false, false, false, 5, 14},
+		{"both flags", []string{"--all", "--debug", "--json", "--since", "30"}, true, true, true, 5, 30},
+		{"since without value", []string{"--since"}, false, false, false, 5, 7},
 	}
 
 	for _, tt := range tests {
@@ -220,6 +260,12 @@ func TestParseArgs(t *testing.T) {
 			}
 			if opts.Debug != tt.debug {
 				t.Errorf("Debug = %v, want %v", opts.Debug, tt.debug)
+			}
+			if opts.JSON != tt.json {
+				t.Errorf("JSON = %v, want %v", opts.JSON, tt.json)
+			}
+			if opts.MinCount != tt.minCount {
+				t.Errorf("MinCount = %d, want %d", opts.MinCount, tt.minCount)
 			}
 			if opts.Since != tt.since {
 				t.Errorf("Since = %d, want %d", opts.Since, tt.since)
@@ -250,6 +296,15 @@ func TestPrintResultEmpty(t *testing.T) {
 	})
 	if !strings.Contains(output, "No Bash commands found") {
 		t.Errorf("expected 'No Bash commands found' in output, got: %q", output)
+	}
+}
+
+func TestPrintResultEmptyAfterMinCount(t *testing.T) {
+	output := captureStdout(t, func() {
+		printResult(Result{SessionsScanned: 3, TotalCommands: 0, MinCount: 5})
+	})
+	if !strings.Contains(output, "minimum count threshold of 5") {
+		t.Errorf("expected threshold message in output, got: %q", output)
 	}
 }
 
@@ -322,5 +377,61 @@ func TestPrintDebug(t *testing.T) {
 		if !strings.Contains(output, want) {
 			t.Fatalf("expected %q in output, got %q", want, output)
 		}
+	}
+}
+
+func TestPrintJSON(t *testing.T) {
+	query := harness.Query{CWD: "/work/repo", ProjectRoot: "/work/repo"}
+	result := Result{
+		SessionsScanned:  2,
+		TotalCommands:    11,
+		SupportedCount:   6,
+		UnsupportedCount: 5,
+		MinCount:         5,
+		Supported:        []CommandStat{{Name: "git", Count: 6}},
+		Unsupported:      []CommandStat{{Name: "cat", Count: 5}},
+		Debug:            []harness.DebugRecord{{Provider: "opencode", Code: "summary", Message: "rows=11 yielded=11"}},
+	}
+
+	output := captureStdout(t, func() {
+		if err := printJSON(Options{Debug: true, JSON: true, Since: 7, MinCount: 5}, query, result); err != nil {
+			t.Fatalf("printJSON() error = %v", err)
+		}
+	})
+
+	var payload struct {
+		Scope            string                `json:"scope"`
+		MinCount         int                   `json:"min_count"`
+		TotalCommands    int                   `json:"total_commands"`
+		SupportedCount   int                   `json:"supported_count"`
+		UnsupportedCount int                   `json:"unsupported_count"`
+		CoveragePercent  float64               `json:"coverage_percent"`
+		Supported        []CommandStat         `json:"supported"`
+		Unsupported      []CommandStat         `json:"unsupported"`
+		Debug            []harness.DebugRecord `json:"debug"`
+	}
+	if err := json.Unmarshal([]byte(output), &payload); err != nil {
+		t.Fatalf("json.Unmarshal() error = %v\noutput=%s", err, output)
+	}
+	if payload.Scope != "/work/repo" {
+		t.Fatalf("Scope = %q, want %q", payload.Scope, "/work/repo")
+	}
+	if payload.MinCount != 5 {
+		t.Fatalf("MinCount = %d, want 5", payload.MinCount)
+	}
+	if payload.TotalCommands != 11 {
+		t.Fatalf("TotalCommands = %d, want 11", payload.TotalCommands)
+	}
+	if payload.SupportedCount != 6 || payload.UnsupportedCount != 5 {
+		t.Fatalf("unexpected counts: %+v", payload)
+	}
+	if len(payload.Supported) != 1 || payload.Supported[0].Name != "git" {
+		t.Fatalf("unexpected supported payload: %+v", payload.Supported)
+	}
+	if len(payload.Unsupported) != 1 || payload.Unsupported[0].Name != "cat" {
+		t.Fatalf("unexpected unsupported payload: %+v", payload.Unsupported)
+	}
+	if len(payload.Debug) != 1 || payload.Debug[0].Provider != "opencode" {
+		t.Fatalf("unexpected debug payload: %+v", payload.Debug)
 	}
 }

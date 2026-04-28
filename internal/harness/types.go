@@ -19,9 +19,9 @@ type Query struct {
 
 // DebugRecord captures provider-level scan diagnostics.
 type DebugRecord struct {
-	Provider string
-	Code     string
-	Message  string
+	Provider string `json:"provider"`
+	Code     string `json:"code"`
+	Message  string `json:"message"`
 }
 
 // Event is the strict normalized session record shared across harnesses.

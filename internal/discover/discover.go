@@ -1,6 +1,7 @@
 package discover
 
 import (
+	"encoding/json"
 	"fmt"
 	"os"
 	"sort"
@@ -17,8 +18,8 @@ import (
 
 // CommandStat tracks command occurrence counts.
 type CommandStat struct {
-	Name  string
-	Count int
+	Name  string `json:"name"`
+	Count int    `json:"count"`
 }
 
 // Result holds the discover analysis output.
@@ -29,15 +30,20 @@ type Result struct {
 	Unsupported      []CommandStat
 	SupportedCount   int
 	UnsupportedCount int
+	MinCount         int
 	Debug            []harness.DebugRecord
 }
 
 // Options configures the discover scan.
 type Options struct {
-	All   bool
-	Debug bool
-	Since int // days
+	All      bool
+	Debug    bool
+	JSON     bool
+	MinCount int
+	Since    int // days
 }
+
+const defaultMinCount = 5
 
 // Run executes the discover command with the given CLI args.
 func Run(args []string) error {
@@ -64,7 +70,10 @@ func Run(args []string) error {
 	if !opts.Debug {
 		query.Debug = nil
 	}
-	result := scan(harness.DefaultProviders(), cmdSet, query)
+	result := applyMinCount(scan(harness.DefaultProviders(), cmdSet, query), opts.MinCount)
+	if opts.JSON {
+		return printJSON(opts, query, result)
+	}
 	if opts.Debug {
 		printDebug(opts, query, result)
 	}
@@ -79,13 +88,15 @@ func Run(args []string) error {
 
 // parseArgs extracts --all and --since flags from args.
 func parseArgs(args []string) Options {
-	opts := Options{Since: 7}
+	opts := Options{Since: 7, MinCount: defaultMinCount}
 	for i := 0; i < len(args); i++ {
 		switch args[i] {
 		case "--all":
 			opts.All = true
 		case "--debug":
 			opts.Debug = true
+		case "--json":
+			opts.JSON = true
 		case "--since":
 			if i+1 < len(args) {
 				n := 0
@@ -104,6 +115,39 @@ func parseArgs(args []string) Options {
 		}
 	}
 	return opts
+}
+
+func applyMinCount(result Result, minCount int) Result {
+	if minCount <= 1 {
+		result.MinCount = minCount
+		return result
+	}
+
+	result.Supported = filterStatsByMinCount(result.Supported, minCount)
+	result.Unsupported = filterStatsByMinCount(result.Unsupported, minCount)
+	result.SupportedCount = sumStats(result.Supported)
+	result.UnsupportedCount = sumStats(result.Unsupported)
+	result.TotalCommands = result.SupportedCount + result.UnsupportedCount
+	result.MinCount = minCount
+	return result
+}
+
+func filterStatsByMinCount(stats []CommandStat, minCount int) []CommandStat {
+	filtered := make([]CommandStat, 0, len(stats))
+	for _, stat := range stats {
+		if stat.Count >= minCount {
+			filtered = append(filtered, stat)
+		}
+	}
+	return filtered
+}
+
+func sumStats(stats []CommandStat) int {
+	total := 0
+	for _, stat := range stats {
+		total += stat.Count
+	}
+	return total
 }
 
 // scan processes all harness events and classifies command usage.
@@ -284,6 +328,48 @@ func defaultScope(opts Options, query harness.Query) string {
 	return firstNonEmpty(query.ProjectRoot, query.CWD, "(unknown)")
 }
 
+func printJSON(opts Options, query harness.Query, result Result) error {
+	response := struct {
+		Scope            string                `json:"scope"`
+		All              bool                  `json:"all"`
+		SinceDays        int                   `json:"since_days"`
+		MinCount         int                   `json:"min_count"`
+		WorkingDirectory string                `json:"working_directory,omitempty"`
+		ProjectRoot      string                `json:"project_root,omitempty"`
+		SessionsScanned  int                   `json:"sessions_scanned"`
+		TotalCommands    int                   `json:"total_commands"`
+		SupportedCount   int                   `json:"supported_count"`
+		UnsupportedCount int                   `json:"unsupported_count"`
+		CoveragePercent  float64               `json:"coverage_percent"`
+		Supported        []CommandStat         `json:"supported"`
+		Unsupported      []CommandStat         `json:"unsupported"`
+		Debug            []harness.DebugRecord `json:"debug,omitempty"`
+	}{
+		Scope:            defaultScope(opts, query),
+		All:              opts.All,
+		SinceDays:        opts.Since,
+		MinCount:         result.MinCount,
+		WorkingDirectory: query.CWD,
+		ProjectRoot:      query.ProjectRoot,
+		SessionsScanned:  result.SessionsScanned,
+		TotalCommands:    result.TotalCommands,
+		SupportedCount:   result.SupportedCount,
+		UnsupportedCount: result.UnsupportedCount,
+		Supported:        result.Supported,
+		Unsupported:      result.Unsupported,
+	}
+	if opts.Debug {
+		response.Debug = result.Debug
+	}
+	if result.TotalCommands > 0 {
+		response.CoveragePercent = float64(result.SupportedCount) / float64(result.TotalCommands) * 100
+	}
+
+	encoder := json.NewEncoder(os.Stdout)
+	encoder.SetIndent("", "  ")
+	return encoder.Encode(response)
+}
+
 // printResult outputs the discover report to stdout.
 func printResult(r Result) {
 	tty := display.IsTerminal()
@@ -299,7 +385,11 @@ func printResult(r Result) {
 	fmt.Println()
 
 	if r.TotalCommands == 0 {
-		fmt.Println("  No Bash commands found in the scanned sessions.")
+		if r.MinCount > 1 {
+			fmt.Printf("  No commands met the minimum count threshold of %d.\n", r.MinCount)
+		} else {
+			fmt.Println("  No Bash commands found in the scanned sessions.")
+		}
 		return
 	}
 

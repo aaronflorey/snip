@@ -3,7 +3,7 @@
 BINARY=snip
 BUILD_DIR=cmd/snip
 VERSION=$(shell git describe --tags --always 2>/dev/null | sed 's/^v//' || echo dev)
-LDFLAGS=-ldflags="-s -w -X 'github.com/edouard-claude/snip/internal/cli.version=$(VERSION)'"
+LDFLAGS=-ldflags="-s -w -X 'github.com/aaronflorey/snip/internal/cli.version=$(VERSION)'"
 
 build:
 	CGO_ENABLED=0 go build -o $(BINARY) $(LDFLAGS) ./$(BUILD_DIR)

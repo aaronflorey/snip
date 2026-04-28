@@ -6,8 +6,8 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/edouard-claude/snip/internal/config"
-	"github.com/edouard-claude/snip/internal/filter"
+	"github.com/aaronflorey/snip/internal/config"
+	"github.com/aaronflorey/snip/internal/filter"
 )
 
 // TestResult holds the outcome of a single filter test.

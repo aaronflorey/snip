@@ -3,9 +3,9 @@ package economics
 import (
 	"fmt"
 
-	"github.com/edouard-claude/snip/internal/display"
-	"github.com/edouard-claude/snip/internal/tracking"
-	"github.com/edouard-claude/snip/internal/utils"
+	"github.com/aaronflorey/snip/internal/display"
+	"github.com/aaronflorey/snip/internal/tracking"
+	"github.com/aaronflorey/snip/internal/utils"
 )
 
 // Options controls the cc-economics report output.

@@ -1,4 +1,4 @@
-module github.com/edouard-claude/snip
+module github.com/aaronflorey/snip
 
 go 1.25.8
 

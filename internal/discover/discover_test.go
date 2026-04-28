@@ -9,7 +9,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/edouard-claude/snip/internal/harness"
+	"github.com/aaronflorey/snip/internal/harness"
 )
 
 type stubProvider struct {

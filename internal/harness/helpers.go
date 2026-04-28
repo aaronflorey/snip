@@ -9,7 +9,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/edouard-claude/snip/internal/hook"
+	"github.com/aaronflorey/snip/internal/hook"
 	"mvdan.cc/sh/v3/syntax"
 )
 

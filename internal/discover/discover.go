@@ -9,11 +9,11 @@ import (
 	"sync"
 	"time"
 
-	"github.com/edouard-claude/snip/internal/config"
-	"github.com/edouard-claude/snip/internal/display"
-	"github.com/edouard-claude/snip/internal/filter"
-	"github.com/edouard-claude/snip/internal/harness"
-	"github.com/edouard-claude/snip/internal/utils"
+	"github.com/aaronflorey/snip/internal/config"
+	"github.com/aaronflorey/snip/internal/display"
+	"github.com/aaronflorey/snip/internal/filter"
+	"github.com/aaronflorey/snip/internal/harness"
+	"github.com/aaronflorey/snip/internal/utils"
 )
 
 // CommandStat tracks command occurrence counts.
@@ -47,7 +47,17 @@ const defaultMinCount = 5
 
 // Run executes the discover command with the given CLI args.
 func Run(args []string) error {
-	opts := parseArgs(args)
+	return RunWithOptions(parseArgs(args))
+}
+
+// RunWithOptions executes discover with parsed options.
+func RunWithOptions(opts Options) error {
+	if opts.Since <= 0 {
+		opts.Since = 7
+	}
+	if opts.MinCount <= 0 {
+		opts.MinCount = defaultMinCount
+	}
 
 	cfg, err := config.Load()
 	if err != nil {

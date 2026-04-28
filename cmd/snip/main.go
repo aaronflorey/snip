@@ -3,7 +3,7 @@ package main
 import (
 	"os"
 
-	snip "github.com/edouard-claude/snip"
+	snip "github.com/aaronflorey/snip"
 )
 
 func main() {

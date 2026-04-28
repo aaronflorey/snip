@@ -3,7 +3,7 @@ package snip
 import (
 	"testing"
 
-	"github.com/edouard-claude/snip/internal/filter"
+	"github.com/aaronflorey/snip/internal/filter"
 )
 
 // TestRun_VersionFlag is a smoke test verifying that Run wires the embedded

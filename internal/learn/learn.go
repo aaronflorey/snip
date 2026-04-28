@@ -10,7 +10,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/edouard-claude/snip/internal/hook"
+	"github.com/aaronflorey/snip/internal/hook"
 )
 
 // sessionLine represents a single JSONL entry from a Claude Code session file.

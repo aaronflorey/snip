@@ -1,8 +1,8 @@
 package snip
 
 import (
-	"github.com/edouard-claude/snip/internal/cli"
-	"github.com/edouard-claude/snip/internal/filter"
+	"github.com/aaronflorey/snip/internal/cli"
+	"github.com/aaronflorey/snip/internal/filter"
 )
 
 // Run executes snip the same way cmd/snip does.

@@ -1,8 +1,13 @@
 <p align="center">
-  <img src="https://img.shields.io/github/v/release/edouard-claude/snip?style=flat-square" alt="Release">
-  <img src="https://img.shields.io/github/actions/workflow/status/edouard-claude/snip/ci.yaml?branch=master&style=flat-square&label=CI" alt="CI">
-  <img src="https://img.shields.io/github/license/edouard-claude/snip?style=flat-square" alt="License">
-  <img src="https://img.shields.io/badge/Go-1.25+-00ADD8?style=flat-square&logo=go" alt="Go">
+  <a href="https://github.com/aaronflorey/snip/releases">
+    <img src="https://img.shields.io/github/v/release/aaronflorey/snip?style=flat-square" alt="Release">
+  </a>
+  <a href="https://github.com/aaronflorey/snip/actions/workflows/ci.yaml">
+    <img src="https://img.shields.io/github/actions/workflow/status/aaronflorey/snip/ci.yaml?branch=master&style=flat-square&label=CI" alt="CI">
+  </a>
+  <a href="https://github.com/aaronflorey/snip/blob/master/LICENSE">
+    <img src="https://img.shields.io/github/license/aaronflorey/snip?style=flat-square" alt="License">
+  </a>
 </p>
 
 # snip - Reduce LLM Token Usage by 60-90%
@@ -42,13 +47,13 @@ snip sits between your AI tool and the shell, filtering output through **declara
 
 ```bash
 # Quick install (macOS/Linux)
-curl -fsSL https://raw.githubusercontent.com/edouard-claude/snip/master/install.sh | sh
+curl -fsSL https://raw.githubusercontent.com/aaronflorey/snip/master/install.sh | sh
 
 # Or via Homebrew
-brew install edouard-claude/tap/snip
+brew install aaronflorey/tap/snip
 
 # Or with Go
-go install github.com/edouard-claude/snip/cmd/snip@latest
+go install github.com/aaronflorey/snip/cmd/snip@latest
 
 # Then hook into Claude Code
 snip init
@@ -60,15 +65,15 @@ snip init
 **Before** — Claude Code sees this (689 tokens):
 ```
 $ go test ./...
-ok  	github.com/edouard-claude/snip/internal/cli	3.728s	coverage: 14.4% of statements
-ok  	github.com/edouard-claude/snip/internal/config	2.359s	coverage: 65.0% of statements
-ok  	github.com/edouard-claude/snip/internal/display	1.221s	coverage: 72.6% of statements
-ok  	github.com/edouard-claude/snip/internal/engine	1.816s	coverage: 47.9% of statements
-ok  	github.com/edouard-claude/snip/internal/filter	4.306s	coverage: 72.3% of statements
-ok  	github.com/edouard-claude/snip/internal/initcmd	2.981s	coverage: 59.1% of statements
-ok  	github.com/edouard-claude/snip/internal/tee	0.614s	coverage: 70.6% of statements
-ok  	github.com/edouard-claude/snip/internal/tracking	5.355s	coverage: 75.0% of statements
-ok  	github.com/edouard-claude/snip/internal/utils	5.515s	coverage: 100.0% of statements
+ok  	github.com/aaronflorey/snip/internal/cli	3.728s	coverage: 14.4% of statements
+ok  	github.com/aaronflorey/snip/internal/config	2.359s	coverage: 65.0% of statements
+ok  	github.com/aaronflorey/snip/internal/display	1.221s	coverage: 72.6% of statements
+ok  	github.com/aaronflorey/snip/internal/engine	1.816s	coverage: 47.9% of statements
+ok  	github.com/aaronflorey/snip/internal/filter	4.306s	coverage: 72.3% of statements
+ok  	github.com/aaronflorey/snip/internal/initcmd	2.981s	coverage: 59.1% of statements
+ok  	github.com/aaronflorey/snip/internal/tee	0.614s	coverage: 70.6% of statements
+ok  	github.com/aaronflorey/snip/internal/tracking	5.355s	coverage: 75.0% of statements
+ok  	github.com/aaronflorey/snip/internal/utils	5.515s	coverage: 100.0% of statements
 ```
 
 **After** — snip returns this (16 tokens):
@@ -109,29 +114,29 @@ Stop wasting tokens on noise. snip gives the LLM the same signal in a fraction o
 ### Homebrew (recommended)
 
 ```bash
-brew install edouard-claude/tap/snip
+brew install aaronflorey/tap/snip
 ```
 
 ### From GitHub Releases
 
-Download the latest binary for your platform from [Releases](https://github.com/edouard-claude/snip/releases).
+Download the latest binary for your platform from [Releases](https://github.com/aaronflorey/snip/releases).
 
 ```bash
 # macOS (Apple Silicon)
-curl -Lo snip.tar.gz https://github.com/edouard-claude/snip/releases/latest/download/snip_$(curl -s https://api.github.com/repos/edouard-claude/snip/releases/latest | grep tag_name | cut -d'"' -f4 | tr -d v)_darwin_arm64.tar.gz
+curl -Lo snip.tar.gz https://github.com/aaronflorey/snip/releases/latest/download/snip_$(curl -s https://api.github.com/repos/aaronflorey/snip/releases/latest | grep tag_name | cut -d'"' -f4 | tr -d v)_darwin_arm64.tar.gz
 tar xzf snip.tar.gz && mv snip /usr/local/bin/
 ```
 
 ### From source
 
 ```bash
-go install github.com/edouard-claude/snip/cmd/snip@latest
+go install github.com/aaronflorey/snip/cmd/snip@latest
 ```
 
 Or build locally:
 
 ```bash
-git clone https://github.com/edouard-claude/snip.git
+git clone https://github.com/aaronflorey/snip.git
 cd snip && make install
 ```
 
@@ -443,18 +448,24 @@ make lint         # go vet + golangci-lint
 make install      # install to $GOPATH/bin
 ```
 
+## Release Automation
+
+- CI runs on pushes and pull requests targeting `main` and `master`.
+- Conventional commits drive versioning through `release-please`.
+- Merging the release PR creates a `vX.X.X` tag, publishes GitHub release artifacts with GoReleaser, and updates `aaronflorey/homebrew-tap`.
+
 ## Documentation
 
-Full documentation is available on the **[Wiki](https://github.com/edouard-claude/snip/wiki)**:
+Full documentation is available on the **[Wiki](https://github.com/aaronflorey/snip/wiki)**:
 
-- [Installation](https://github.com/edouard-claude/snip/wiki/Installation) — Homebrew, Go, binaries (macOS/Linux/Windows), from source
-- [Integration](https://github.com/edouard-claude/snip/wiki/Integration) — Claude Code, Cursor, Copilot, Gemini, Kilo Code, Antigravity, and more
-- [Gain Dashboard](https://github.com/edouard-claude/snip/wiki/Gain-Dashboard) — Token savings reports and analytics
-- [Filters](https://github.com/edouard-claude/snip/wiki/Filters) — Built-in filters, custom filters
-- [Filter DSL Reference](https://github.com/edouard-claude/snip/wiki/Filter-DSL-Reference) — All 19 pipeline actions
-- [Configuration](https://github.com/edouard-claude/snip/wiki/Configuration) — TOML config, environment variables
-- [Architecture](https://github.com/edouard-claude/snip/wiki/Architecture) — Design decisions, internals
-- [Contributing](https://github.com/edouard-claude/snip/wiki/Contributing) — Dev setup, adding filters, conventions
+- [Installation](https://github.com/aaronflorey/snip/wiki/Installation) — Homebrew, Go, binaries (macOS/Linux/Windows), from source
+- [Integration](https://github.com/aaronflorey/snip/wiki/Integration) — Claude Code, Cursor, Copilot, Gemini, Kilo Code, Antigravity, and more
+- [Gain Dashboard](https://github.com/aaronflorey/snip/wiki/Gain-Dashboard) — Token savings reports and analytics
+- [Filters](https://github.com/aaronflorey/snip/wiki/Filters) — Built-in filters, custom filters
+- [Filter DSL Reference](https://github.com/aaronflorey/snip/wiki/Filter-DSL-Reference) — All 19 pipeline actions
+- [Configuration](https://github.com/aaronflorey/snip/wiki/Configuration) — TOML config, environment variables
+- [Architecture](https://github.com/aaronflorey/snip/wiki/Architecture) — Design decisions, internals
+- [Contributing](https://github.com/aaronflorey/snip/wiki/Contributing) — Dev setup, adding filters, conventions
 
 ## Credits
 

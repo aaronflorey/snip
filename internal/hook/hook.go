@@ -7,7 +7,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/edouard-claude/snip/internal/hookaudit"
+	"github.com/aaronflorey/snip/internal/hookaudit"
 )
 
 // hookInput represents the JSON payload from Claude Code PreToolUse.

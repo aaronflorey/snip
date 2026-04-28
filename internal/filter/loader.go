@@ -7,7 +7,7 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/edouard-claude/snip/internal/trust"
+	"github.com/aaronflorey/snip/internal/trust"
 )
 
 // isYAMLFile returns true if the filename ends with .yaml or .yml.

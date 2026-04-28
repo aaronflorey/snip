@@ -7,14 +7,14 @@ import (
 
 	"path/filepath"
 
-	"github.com/edouard-claude/snip/internal/config"
-	"github.com/edouard-claude/snip/internal/display"
-	"github.com/edouard-claude/snip/internal/engine"
-	"github.com/edouard-claude/snip/internal/filter"
-	"github.com/edouard-claude/snip/internal/hook"
-	"github.com/edouard-claude/snip/internal/tee"
-	"github.com/edouard-claude/snip/internal/tracking"
-	"github.com/edouard-claude/snip/internal/trust"
+	"github.com/aaronflorey/snip/internal/config"
+	"github.com/aaronflorey/snip/internal/display"
+	"github.com/aaronflorey/snip/internal/engine"
+	"github.com/aaronflorey/snip/internal/filter"
+	"github.com/aaronflorey/snip/internal/hook"
+	"github.com/aaronflorey/snip/internal/tee"
+	"github.com/aaronflorey/snip/internal/tracking"
+	"github.com/aaronflorey/snip/internal/trust"
 )
 
 // version is set at build time via -ldflags "-X ...". Do not reassign.

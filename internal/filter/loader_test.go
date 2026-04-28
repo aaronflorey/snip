@@ -5,7 +5,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/edouard-claude/snip/internal/trust"
+	"github.com/aaronflorey/snip/internal/trust"
 )
 
 // trustAllFiles creates a trust store with all YAML files in the given

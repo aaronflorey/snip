@@ -8,7 +8,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/edouard-claude/snip/internal/filter"
+	"github.com/aaronflorey/snip/internal/filter"
 )
 
 func TestApplyPipelineKeepLines(t *testing.T) {

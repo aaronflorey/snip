@@ -10,7 +10,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/edouard-claude/snip/internal/tracking"
+	"github.com/aaronflorey/snip/internal/tracking"
 )
 
 func newTestTracker(t *testing.T) *tracking.Tracker {

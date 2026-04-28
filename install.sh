@@ -1,10 +1,10 @@
 #!/bin/sh
 # install.sh - Install snip (LLM token optimizer)
-# Usage: curl -fsSL https://raw.githubusercontent.com/edouard-claude/snip/master/install.sh | sh
+# Usage: curl -fsSL https://raw.githubusercontent.com/aaronflorey/snip/master/install.sh | sh
 
 set -e
 
-REPO="edouard-claude/snip"
+REPO="aaronflorey/snip"
 INSTALL_DIR="/usr/local/bin"
 FALLBACK_DIR="${HOME}/.local/bin"
 

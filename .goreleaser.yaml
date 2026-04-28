@@ -1,5 +1,7 @@
 version: 2
 
+project_name: snip
+
 gomod:
   proxy: false
 
@@ -7,7 +9,7 @@ builds:
   - main: ./cmd/snip
     binary: snip
     ldflags:
-      - -s -w -X github.com/edouard-claude/snip/internal/cli.version={{ .Version }}
+      - -s -w -X github.com/aaronflorey/snip/internal/cli.version={{ .Version }}
     env:
       - CGO_ENABLED=0
     goos:
@@ -28,12 +30,19 @@ archives:
 checksum:
   name_template: "checksums.txt"
 
-homebrew_casks:
+brews:
   - repository:
-      owner: edouard-claude
+      owner: aaronflorey
       name: homebrew-tap
-    homepage: "https://github.com/edouard-claude/snip"
-    description: "CLI proxy that reduces LLM token consumption by 60-90% by filtering shell output"
+      token: "{{ .Env.HOMEBREW_TAP_GITHUB_TOKEN }}"
+    directory: Formula
+    homepage: "https://github.com/aaronflorey/snip"
+    description: "CLI proxy that reduces LLM token consumption by filtering shell output"
+    license: MIT
+    install: |
+      bin.install "snip"
+    test: |
+      system "#{bin}/snip", "--version"
 
 changelog:
   sort: asc

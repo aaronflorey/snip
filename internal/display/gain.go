@@ -6,8 +6,8 @@ import (
 	"fmt"
 	"os"
 
-	"github.com/edouard-claude/snip/internal/tracking"
-	"github.com/edouard-claude/snip/internal/utils"
+	"github.com/aaronflorey/snip/internal/tracking"
+	"github.com/aaronflorey/snip/internal/utils"
 )
 
 // GainOptions controls the gain report output.

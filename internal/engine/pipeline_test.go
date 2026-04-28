@@ -163,9 +163,7 @@ func TestPipelineRunSilentWhenFilterExcludedByFlags(t *testing.T) {
 	}
 
 	// Test mechanism: the filter requires --json, but Run() is called with no flags.
-	// Therefore Match() returns nil (flag mismatch), yet HasAnyFilter() still returns
-	// true (a filter *exists* for "true"). The expected behavior is silence on stderr;
-	// before the fix in #36, a misleading "no filter for true" message was printed.
+	// Therefore Match() returns nil (flag mismatch). Passthrough should stay silent.
 	f := filter.Filter{
 		Name:    "true-json",
 		Version: 1,
@@ -178,7 +176,7 @@ func TestPipelineRunSilentWhenFilterExcludedByFlags(t *testing.T) {
 	reg := filter.NewRegistry([]filter.Filter{f})
 	p := &Pipeline{
 		Registry:      reg,
-		QuietNoFilter: false, // messages enabled - bug would print here
+		QuietNoFilter: false,
 	}
 
 	// Capture stderr by swapping os.Stderr with a pipe.
@@ -199,5 +197,59 @@ func TestPipelineRunSilentWhenFilterExcludedByFlags(t *testing.T) {
 
 	if strings.Contains(buf.String(), "no filter for") {
 		t.Errorf("expected silent stderr when filter exists but excluded by flags, got: %q", buf.String())
+	}
+}
+
+func TestPipelineRunSilentWhenCommandHasNoFilter(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("skipping: test script uses sh")
+	}
+
+	dir := t.TempDir()
+	path := dir + "/snip-passthrough-test"
+	if err := os.WriteFile(path, []byte("#!/bin/sh\nprintf 'ok\\n'\n"), 0755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", dir+string(os.PathListSeparator)+os.Getenv("PATH"))
+
+	p := &Pipeline{
+		Registry:      filter.NewRegistry(nil),
+		QuietNoFilter: false,
+	}
+
+	oldStdout := os.Stdout
+	outR, outW, err := os.Pipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	os.Stdout = outW
+	t.Cleanup(func() { os.Stdout = oldStdout })
+
+	oldStderr := os.Stderr
+	errR, errW, err := os.Pipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	os.Stderr = errW
+	t.Cleanup(func() { os.Stderr = oldStderr })
+
+	code := p.Run("snip-passthrough-test", nil)
+
+	_ = outW.Close()
+	_ = errW.Close()
+
+	var stdoutBuf bytes.Buffer
+	_, _ = io.Copy(&stdoutBuf, outR)
+	var stderrBuf bytes.Buffer
+	_, _ = io.Copy(&stderrBuf, errR)
+
+	if code != 0 {
+		t.Fatalf("expected exit code 0, got %d", code)
+	}
+	if stdoutBuf.String() != "ok\n" {
+		t.Fatalf("expected passthrough stdout, got %q", stdoutBuf.String())
+	}
+	if stderrBuf.Len() != 0 {
+		t.Fatalf("expected silent stderr, got %q", stderrBuf.String())
 	}
 }

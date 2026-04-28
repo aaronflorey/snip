@@ -135,7 +135,7 @@ func TestHasAnyFilter(t *testing.T) {
 	reg := NewRegistry([]Filter{f})
 
 	// Key scenario: Match returns nil due to -v, but HasAnyFilter must still return true.
-	// This is what suppresses the misleading "no filter for go" message.
+	// This distinguishes flag exclusions from a command that has no matching filter.
 	if reg.Match("go", "test", []string{"-v"}) != nil {
 		t.Error("Match should return nil when -v is excluded")
 	}

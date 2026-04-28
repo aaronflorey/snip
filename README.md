@@ -18,6 +18,8 @@ AI coding agents burn tokens on verbose shell output that adds zero signal. A pa
 
 snip sits between your AI tool and the shell, filtering output through **declarative YAML pipelines**. Write a YAML file, drop it in a folder, done. The extensible LLM token optimizer: filters are YAML data files, not compiled code.
 
+The original inspiration for snip came from [rtk](https://github.com/rtk-ai/rtk) by the rtk-ai team. snip carries that core idea forward in Go with a more open, declarative filter model.
+
 ```
   snip — Token Savings Report
   ══════════════════════════════
@@ -369,7 +371,7 @@ db_path = "~/.local/share/snip/tracking.db"
 [display]
 color = true
 emoji = true
-quiet_no_filter = false  # suppress "no filter" stderr messages
+quiet_no_filter = false  # suppress disabled-filter stderr messages
 
 [filters]
 dir = "~/.config/snip/filters"
